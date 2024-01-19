@@ -90,7 +90,7 @@
 →結合テストに重点を置いた戦略   
 →フロントエンドが提供する機能は、ユーザー操作を起点に提供されるため、ユーザー操作を起点とする結合テストにリソースを注ぐことがより良いテスト戦略になるという意図が込められている
 
-# 単体テスト
+# 第3章：単体テスト
 テストするコード
 ```
 export function add(a: number, b: number) {
@@ -543,3 +543,594 @@ test("指定時間待つと、経過時間をもって reject される", async 
   }
 });
 ```
+
+# 第4章：モック
+データ取得の失敗などを再現するために「モック」が必要になる。
+
+
+## モックの用語整理
+
+**「スタブ」**
+→「代用」を目的としたモック
+
+- 依存コンポーネントの代用品
+- 定められた値を返却する
+- テスト対象に「入力」を与える
+
+**「スパイ」**
+→「記録」を目的とするモック
+
+- 関数やメソッドの呼び出しを記録するオブジェクト
+- 呼び出された回数、実行時引数を記録するもの
+- テスト対象からあの「出力」を確認するためのもの
+
+例）関数引数のコールバック関数
+
+## モックモジュールを使ったスタブ(関数やライブラリーの置き換え)
+
+Jestではモックモジュールを使用してスタブを適用する
+
+- テスト対象の関数
+関数 sayGoodByeは未実装のためエラーを返す
+```
+export function greet(name: string) {
+  return `Hello! ${name}.`;
+}
+
+export function sayGoodBye(name: string) {
+  throw new Error("未実装");
+}
+```
+
+- テスト１
+テストは成功する。
+```
+import { greet } from "./greet";
+
+test("挨拶を返す（本来の実装どおり）", () => {
+  expect(greet("Taro")).toBe("Hello! Taro.");
+});
+```
+
+- テスト2
+jest.mock("./greet")でモジュールの置き換えが実行され、greetはundefinedを返すようになる。
+
+```
+import { greet } from "./greet";
+
+jest.mock("./greet");
+
+test("挨拶を返さない（本来の実装ではない）", () => {
+  expect(greet("Taro")).toBe(undefined);
+});
+```
+
+- テスト３
+第2引数に代用の関数を施すことでsayGoodBye関数を置き換えることができる。
+```
+import { greet, sayGoodBye } from "./greet";
+
+jest.mock("./greet", () => ({
+  sayGoodBye: (name: string) => `Good bye, ${name}.`,
+}));
+
+test("挨拶が未実装（本来の実装ではない）", () => {
+  expect(greet).toBe(undefined);
+});
+
+test("さよならを返す（本来の実装ではない）", () => {
+  const message = `${sayGoodBye("Taro")} See you.`;
+  expect(message).toBe("Good bye, Taro. See you.");
+});
+```
+
+- テスト４
+jest.requireActualを使用することで、.greetの本来の実装をimportできる。
+以下はsayGoodBye関数のみを置き換えている。
+```
+import { greet, sayGoodBye } from "./greet";
+
+jest.mock("./greet", () => ({
+  ...jest.requireActual("./greet"),
+  sayGoodBye: (name: string) => `Good bye, ${name}.`,
+}));
+
+test("挨拶を返す（本来の実装どおり）", () => {
+  expect(greet("Taro")).toBe("Hello! Taro.");
+});
+
+test("さよならを返す（本来の実装ではない）", () => {
+  const message = `${sayGoodBye("Taro")} See you.`;
+  expect(message).toBe("Good bye, Taro. See you.");
+});
+```
+
+- ライブラリの置き換え
+以下のように使用するライブラリも置き換えができる
+```
+jest.mock("next/router",()=>require("next-router-mock"))
+```
+
+## Web APIのモック
+- テスト対象
+getMyProfileをスタブに置き換える
+```
+export type Profile = {
+  id: string;
+  name?: string;
+  age?: number;
+  email: string;
+};
+
+export function getMyProfile(): Promise<Profile> {
+  return fetch(host("/my/profile")).then(handleResponse);
+}
+```
+```
+import { getMyProfile } from "../fetchers";
+
+export async function getGreet() {
+  // テストしたいのはここのデータ取得と
+  const data = await getMyProfile();
+  // 取得したデータをここで連結する処理
+  if (!data.name) {
+    return `Hello, anonymous user!`;
+  }
+  return `Hello, ${data.name}!`;
+}
+```
+
+今回のスタブの実装にjest.spyOnを使用する。
+
+まずは置き換えの宣言を行う
+```
+import * as Fetchers from "../fetchers";
+
+jest.mock("../fetchers");
+```
+
+対象の関数の置き換えをjest.spyOnで行う。
+```
+jest.spyOn(対象のオブジェクト, 対象の関数名称);
+jest.spyOn(Fetchers, "getMyProfile")
+```
+
+- データ取得成功を再現するテスト
+fetch成功時のテストを行う場合、.mockResolvedValueOnceで指定する
+```
+// getMyProfile が resolve した時の値を再現
+jest.spyOn(Fetchers, "getMyProfile").mockResolvedValueOnce({
+  id: "xxxxxxx-123456",
+  email: "taroyamada@myapi.testing.com",
+  name: "taroyamada",
+});
+```
+
+- データ取得失敗を再現するテスト
+mockRejectedValueOnceで実装する
+```
+// getMyProfile が reject した時の値を再現
+jest.spyOn(Fetchers, "getMyProfile").mockRejectedValueOnce(httpError);
+await expect(getGreet()).rejects.toMatchObject({
+  err: { message: "internal server error" },
+});
+```
+
+## Web API モック生成関数
+前の節では性的なデータを返すスタブを使用したが、今節ではレスポンスデータを切り替える「モック生成関数」を使用する。
+
+- テスト対象
+```
+export type Article = {
+  id: string;
+  createdAt: string;
+  tags: string[];
+  title: string;
+  body: string;
+};
+
+export type Articles = {
+  articles: Article[];
+};
+
+import { getMyArticles } from "../fetchers";
+
+export async function getMyArticleLinksByCategory(category: string) {
+  // データを取得する関数
+  const data = await getMyArticles();
+  // 取得したデータのうち、指定したタグが含まれる記事に絞り込む
+  const articles = data.articles.filter((article) =>
+    article.tags.includes(category)
+  );
+  if (!articles.length) {
+    // 該当記事がない場合、null を返す
+    return null;
+  }
+  // 該当記事がある場合、一覧向けに加工したデータを返す
+  return articles.map((article) => ({
+    title: article.title,
+    link: `/articles/${article.id}`,
+  }));
+}
+```
+
+**テスト項目**
+1. 指定したタグを持つ記事が一件もない場合nullが変える
+1. 指定したダグを持つ記事が一件以上ある場合、リンク一覧が返る
+1. データ取得に失敗した場合、例外がスローされる
+
+テスト対象はgetMyArticlesでfetchしているが、このレスポンスを再現するデータを準備する。
+レスポンスを再現するテスト用データを **フィクスチャー** と呼ぶ。
+
+```
+export const getMyArticlesData: Articles = {
+  articles: [
+    {
+      id: "howto-testing-with-typescript",
+      createdAt: "2022-07-19T22:38:41.005Z",
+      tags: ["testing"],
+      title: "TypeScript を使ったテストの書き方",
+      body: "テストを書く時、TypeScript を使うことで、テストの保守性が向上します…",
+    },
+    {
+      id: "nextjs-link-component",
+      createdAt: "2022-07-19T22:38:41.005Z",
+      tags: ["nextjs"],
+      title: "Next.js の Link コンポーネント",
+      body: "Next.js の画面遷移には、Link コンポーネントを使用します…",
+    },
+    {
+      id: "react-component-testing-with-jest",
+      createdAt: "2022-07-19T22:38:41.005Z",
+      tags: ["testing", "react"],
+      title: "Jest ではじめる React のコンポーネントテスト",
+      body: "Jest は単体テストとして、UIコンポーネントのテストが可能です…",
+    },
+  ],
+};
+```
+
+フィクスチャーを用いてモック生成関数を使った関数を実装
+
+```
+function mockGetMyArticles(status = 200) {
+  if (status > 299) {
+    return jest
+      .spyOn(Fetchers, "getMyArticles")
+      .mockRejectedValueOnce(httpError);
+  }
+  return jest
+    .spyOn(Fetchers, "getMyArticles")
+    .mockResolvedValueOnce(getMyArticlesData);
+}
+```
+
+この関数のおかげで.spyOnを逐次実行する必要がなくなる。
+
+```
+test("データ取得に成功", async () => {
+  mockGetMyArticles();
+});
+
+test("データ取得に失敗", async () => {
+  mockGetMyArticles(500);
+});
+```
+
+- データ取得成功を再現するテスト
+下記のテストはplaywrightというタグの記事は一件もないのでnullが変えるかを検証する
+```
+test("指定したタグをもつ記事が一件もない場合、null が返る", async () => {
+  mockGetMyArticles();
+  const data = await getMyArticleLinksByCategory("playwright");
+  expect(data).toBeNull();
+});
+```
+
+下記のテストはtestingタグを持つ記事がフィクスチャーに存在するため、リンク一覧を返し成功する。
+```
+test("指定したタグをもつ記事が一件以上ある場合、リンク一覧が返る", async () => {
+  mockGetMyArticles();
+  const data = await getMyArticleLinksByCategory("testing");
+  expect(data).toMatchObject([
+    {
+      link: "/articles/howto-testing-with-typescript",
+      title: "TypeScript を使ったテストの書き方",
+    },
+    {
+      link: "/articles/react-component-testing-with-jest",
+      title: "Jest ではじめる React のコンポーネントテスト",
+    },
+  ]);
+});
+```
+
+- データ取得失敗を再現するテスト
+```
+test("データ取得に失敗した場合、reject される", async () => {
+  mockGetMyArticles(500);
+  await getMyArticleLinksByCategory("testing").catch((err) => {
+    expect(err).toMatchObject({
+      err: { message: "internal server error" },
+    });
+  });
+});
+
+```
+
+## モック関数を使ったスパイ
+スパイ＝テスト対象にどのような入出力が生じたかを記録するオブジェクト
+
+モック関数を利用しスパイを実装する。
+jest.fnでモック関数を作成する。
+
+- 実行されたかの検証
+.toBeCalledで関すが実行されたかを検証できる。
+```
+test("モック関数は実行された", () => {
+  const mockFn = jest.fn();
+  mockFn();
+  expect(mockFn).toBeCalled();
+});
+
+test("モック関数は実行されていない", () => {
+  const mockFn = jest.fn();
+  expect(mockFn).not.toBeCalled();
+});
+```
+
+- 実行されたかの検証
+.toHaveBeenCalledTimes(n)でn回実行されたかを検証
+```
+test("モック関数は実行された回数を記録している", () => {
+  const mockFn = jest.fn();
+  mockFn();
+  expect(mockFn).toHaveBeenCalledTimes(1);
+  mockFn();
+  expect(mockFn).toHaveBeenCalledTimes(2);
+});
+```
+
+- 実行時引数の検証
+モック関数は関数内で実行することも可能
+```
+test("モック関数は関数の中でも実行できる", () => {
+  const mockFn = jest.fn();
+  function greet() {
+    mockFn();
+  }
+  greet();
+  expect(mockFn).toHaveBeenCalledTimes(1);
+});
+```
+
+引数を渡してモック関数を実行すると、それが記録される。
+モック関数に引数を渡すと.toHaveBeenCalledWithで引数の検証を行うことができる。
+```
+test("モック関数は実行時の引数を記録している", () => {
+  const mockFn = jest.fn();
+  function greet(message: string) {
+    mockFn(message);
+  }
+  greet("hello");
+  expect(mockFn).toHaveBeenCalledWith("hello");
+});
+```
+
+- スパイとしての利用方法
+モック関数のスパイの活躍の場＝**テスト対象の引数に関数がある時**
+
+テスト対象
+```
+export function greet(name: string, callback?: (message: string) => void) {
+  callback?.(`Hello! ${name}`);
+}
+```
+
+テストコード
+以下のテストはコールバック関数の引数を検証できる
+```
+test("モック関数はテスト対象の引数として使用できる", () => {
+  const mockFn = jest.fn();
+  greet("Jiro", mockFn);
+  expect(mockFn).toHaveBeenCalledWith("Hello! Jiro");
+});
+```
+
+- 実行時引数のオブジェクト検証
+文字列以外にもオブジェクトの検証もできる
+
+テスト対象
+```
+const config = {
+  mock: true,
+  feature: { spy: true },
+};
+
+export function checkConfig(callback?: (payload: object) => void) {
+  callback?.(config);
+}
+```
+
+テストコード
+```
+test("モック関数は実行時引数のオブジェクト検証ができる", () => {
+  const mockFn = jest.fn();
+  checkConfig(mockFn);
+  expect(mockFn).toHaveBeenCalledWith({
+    mock: true,
+    feature: { spy: true },
+  });
+});
+```
+
+オブジェクトの一部を検証するにはexpect.objectContainingという補助関数を使用する
+```
+test("expect.objectContaining による部分検証", () => {
+  const mockFn = jest.fn();
+  checkConfig(mockFn);
+  expect(mockFn).toHaveBeenCalledWith(
+    expect.objectContaining({
+      feature: { spy: true },
+    })
+  );
+});
+```
+
+## WebApiの詳細なモック
+入力値を検証した上でレスポンスデータを切り替えるモックの実装
+
+- テスト対象
+サーバーサイドのバリデーションを再現した関数。
+```
+export class ValidationError extends Error { }
+
+export function checkLength(value: string) {
+  if (value.length === 0) {
+    throw new ValidationError("1文字以上入力してください");
+  }
+}
+```
+
+- モック生成関数を用意する
+```
+function mockPostMyArticle(input: ArticleInput, status = 200) {
+  if (status > 299) {
+    return jest
+      .spyOn(Fetchers, "postMyArticle")
+      .mockRejectedValueOnce(httpError);
+  }
+  try {
+    checkLength(input.title);
+    checkLength(input.body);
+    return jest
+      .spyOn(Fetchers, "postMyArticle")
+      .mockResolvedValue({ ...postMyArticleData, ...input });
+  } catch (err) {
+    return jest
+      .spyOn(Fetchers, "postMyArticle")
+      .mockRejectedValueOnce(httpError);
+  }
+}
+```
+
+- テストの準備
+送信する値を動的に作成するファクトリー関数を作成
+```
+function inputFactory(input?: Partial<ArticleInput>) {
+  return {
+    tags: ["testing"],
+    title: "TypeScript を使ったテストの書き方",
+    body: "テストを書く時、TypeScript を使うことで、テストの保守性が向上します。",
+    ...input,
+  };
+}
+```
+
+- バリデーション成功のテスト
+
+```
+test("バリデーションに成功した場合、成功レスポンスが返る", async () => {
+  // バリデーションに通過する入力値を用意
+  const input = inputFactory();
+  // 入力値を含んだ成功レスポンスが返るよう、モックを施す
+  const mock = mockPostMyArticle(input);
+  // テスト対象の関数に、input を与えて実行
+  const data = await postMyArticle(input);
+  // 取得したデータに、入力内容が含まれているかを検証
+  expect(data).toMatchObject(expect.objectContaining(input));
+  // モック関数が呼び出されたかを検証
+  expect(mock).toHaveBeenCalled();
+});
+```
+
+- バリデーション失敗のテスト
+```
+test("バリデーションに失敗した場合、reject される", async () => {
+  expect.assertions(2);
+  // バリデーションに通過しない入力値を用意
+  const input = inputFactory({ title: "", body: "" });
+  // 入力値を含んだ成功レスポンスが返るよう、モックを施す
+  const mock = mockPostMyArticle(input);
+  // バリデーションに通過せず reject されるかを検証
+  await postMyArticle(input).catch((err) => {
+    // エラーオブジェクトをもって reject されたことを検証
+    expect(err).toMatchObject({ err: { message: expect.anything() } });
+    // モック関数が呼び出されたことを検証
+    expect(mock).toHaveBeenCalled();
+  });
+});
+```
+- データ取得失敗のテスト
+```
+test("データ取得に失敗した場合、reject される", async () => {
+  expect.assertions(2);
+  // バリデーションに通過する入力値を用意
+  const input = inputFactory();
+  // 失敗レスポンスが返るようモックを施す
+  const mock = mockPostMyArticle(input, 500);
+  // reject されるかを検証
+  await postMyArticle(input).catch((err) => {
+    // エラーオブジェクトをもって reject されたことを検証
+    expect(err).toMatchObject({ err: { message: expect.anything() } });
+    // モック関数が呼び出されたことを検証
+    expect(mock).toHaveBeenCalled();
+  });
+});
+```
+
+## 現在時刻に依存したテスト
+- テスト対象
+ Date().getHours()ののため、現在時刻に依存している。
+```
+export function greetByTime() {
+  const hour = new Date().getHours();
+  if (hour < 12) {
+    return "おはよう";
+  } else if (hour < 18) {
+    return "こんにちは";
+  }
+  return "こんばんは";
+}
+
+```
+
+- 現在時刻を固定
+jest.useFakeTimers:Jestに偽のタイマーを使用するように指示
+jest.setSystemTime:偽のタイマーで使用される時刻を設定
+
+jest.setRealTime:Jestに本物の時刻を使用するように（元に戻すように）指示
+
+```
+import { greetByTime } from ".";
+
+describe("greetByTime(", () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  test("朝は「おはよう」を返す", () => {
+    jest.setSystemTime(new Date(2023, 4, 23, 8, 0, 0));
+    expect(greetByTime()).toBe("おはよう");
+  });
+
+  test("昼は「こんにちは」を返す", () => {
+    jest.setSystemTime(new Date(2023, 4, 23, 14, 0, 0));
+    expect(greetByTime()).toBe("こんにちは");
+  });
+
+  test("夜は「こんばんは」を返す", () => {
+    jest.setSystemTime(new Date(2023, 4, 23, 21, 0, 0));
+    expect(greetByTime()).toBe("こんばんは");
+  });
+});
+
+```
+
+※ セットアップと破棄
+全テストの前後＝**beforeAll,afterAll**
+各テストの前後＝**beforeEach,afterEach**
