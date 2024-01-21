@@ -1134,3 +1134,59 @@ describe("greetByTime(", () => {
 ※ セットアップと破棄
 全テストの前後＝**beforeAll,afterAll**
 各テストの前後＝**beforeEach,afterEach**
+
+# UIコンポーネントテスト
+## 必要なライブラリ
+
+### DOM API
+UIコンポーネントのテストはDOM APIが必要だが Node.jsには用意されていない。
+そこで使用するのが **jsdom**
+jest-environment-jsdomをインストール
+
+jest.config.tsに指定。
+```:jest.config.ts
+module.exports = {
+  testEnvironment: "jest-environment-jsdom,
+};
+```
+
+### Testing Library
+Testing Library = Uiコンポーネントのテスト用ライブラリ
+
+役割は以下三つ
+- UIコンポーネントのレンダリング
+- レンダリングした要素から任意の子要素を取得
+- レンダリングした要素にインタラクションを与える
+
+@testing-libraly/react を使用する。
+
+### UIコンポーネント用のマッチャー拡張
+UIコンポーネントにもJestのマッチャー、アサーションが使用できるがDOMの状態を検証するには不十分のため @testing-libraly-jest-domを使用する。
+
+### ユーザー操作をシュミレートするライブラリ
+実際のユーザー操作に近いテストを行える@testing-library/user-eventを追加する。
+
+## テストの実行
+- テストの対象
+```
+type Props = {
+  name: string;
+  onSubmit?: (event: React.FormEvent<HTMLFormElement>) => void;
+};
+export const Form = ({ name, onSubmit }: Props) => {
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSubmit?.(event);
+      }}
+    >
+      <h2>アカウント情報</h2>
+      <p>{name}</p>
+      <div>
+        <button>編集する</button>
+      </div>
+    </form>
+  );
+};
+```
