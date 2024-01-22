@@ -1190,3 +1190,64 @@ export const Form = ({ name, onSubmit }: Props) => {
   );
 };
 ```
+
+- レンダリングのテスト
+testing-ribralyのrender関数を使用して、テスト対象のUIコンポーネントをレンダリング。
+screen.getByTextで一致した文字列を持つ要素を一つ取得できる。
+
+.toBeInTheDocument()は@testing-libraly-jest-domで拡張されたマッチャーで要素がドキュメントに存在することを検証する。
+
+```
+import { render, screen } from "@testing-library/react";
+import { Form } from "./Form";
+
+test("名前の表示", () => {
+  render(<Form name="taro" />);
+  expect(screen.getByText("taro")).toBeInTheDocument();
+});
+```
+
+拡張アサーションはimportする必要がない。
+ルートディレクトリのjest.setup.tsでインポートを行っている。
+```:jest.setup.ts
+import "@testing-library/jest-dom";
+import React from "react";
+
+global.React = React;
+```
+
+- 特定のDOM要素をロールで取得
+dom要素roleをgetByRole("button")で取得している
+```
+test("ボタンの表示", () => {
+  render(<Form name="taro" />);
+  expect(screen.getByRole("button")).toBeInTheDocument();
+});
+```
+
+- 見出しのアサーション
+.getByRole("heading")により<h2>への参照が得られる。
+.toHaveTextContent("アカウント情報")で見出しに特定の文字列が含まれるかを検証している。
+```
+test("見出しの表示", () => {
+  render(<Form name="taro" />);
+  expect(screen.getByRole("heading")).toHaveTextContent("アカウント情報");
+});
+```
+
+- イベントハンドラーの呼び出しテスト
+イベントハンドラー＝イベントが発生した際に呼び出される関数
+
+onSubmitにモック関数を置換している。
+fireEvent.clickでボタンクリックを再現することができ、イベントハンドラーのモック関数が実行されたかを検証している。
+
+```
+import { fireEvent, logRoles, render, screen } from "@testing-library/react";
+
+test("ボタンを押下すると、イベントハンドラーが呼ばれる", () => {
+  const mockFn = jest.fn();
+  render(<Form name="taro" onSubmit={mockFn} />);
+  fireEvent.click(screen.getByRole("button"));
+  expect(mockFn).toHaveBeenCalled();
+});
+```
