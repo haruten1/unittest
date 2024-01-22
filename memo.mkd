@@ -1190,3 +1190,295 @@ export const Form = ({ name, onSubmit }: Props) => {
   );
 };
 ```
+
+- レンダリングのテスト
+testing-ribralyのrender関数を使用して、テスト対象のUIコンポーネントをレンダリング。
+screen.getByTextで一致した文字列を持つ要素を一つ取得できる。
+
+.toBeInTheDocument()は@testing-libraly-jest-domで拡張されたマッチャーで要素がドキュメントに存在することを検証する。
+
+```
+import { render, screen } from "@testing-library/react";
+import { Form } from "./Form";
+
+test("名前の表示", () => {
+  render(<Form name="taro" />);
+  expect(screen.getByText("taro")).toBeInTheDocument();
+});
+```
+
+拡張アサーションはimportする必要がない。
+ルートディレクトリのjest.setup.tsでインポートを行っている。
+```:jest.setup.ts
+import "@testing-library/jest-dom";
+import React from "react";
+
+global.React = React;
+```
+
+- 特定のDOM要素をロールで取得
+dom要素roleをgetByRole("button")で取得している
+```
+test("ボタンの表示", () => {
+  render(<Form name="taro" />);
+  expect(screen.getByRole("button")).toBeInTheDocument();
+});
+```
+
+- 見出しのアサーション
+.getByRole("heading")により<h2>への参照が得られる。
+.toHaveTextContent("アカウント情報")で見出しに特定の文字列が含まれるかを検証している。
+```
+test("見出しの表示", () => {
+  render(<Form name="taro" />);
+  expect(screen.getByRole("heading")).toHaveTextContent("アカウント情報");
+});
+```
+
+- イベントハンドラーの呼び出しテスト
+イベントハンドラー＝イベントが発生した際に呼び出される関数
+
+onSubmitにモック関数を置換している。
+fireEvent.clickでボタンクリックを再現することができ、イベントハンドラーのモック関数が実行されたかを検証している。
+
+```
+import { fireEvent, logRoles, render, screen } from "@testing-library/react";
+
+test("ボタンを押下すると、イベントハンドラーが呼ばれる", () => {
+  const mockFn = jest.fn();
+  render(<Form name="taro" onSubmit={mockFn} />);
+  fireEvent.click(screen.getByRole("button"));
+  expect(mockFn).toHaveBeenCalled();
+});
+```
+
+## 一覧コンポーネントのテスト
+- テスト対象
+```
+import { ArticleListItem, ItemProps } from "./ArticleListItem";
+
+type Props = {
+  items: ItemProps[];
+};
+
+export const ArticleList = ({ items }: Props) => {
+  return (
+    <div>
+      <h2>記事一覧</h2>
+      {items.length ? (
+        <ul>
+          {items.map((item) => (
+            <ArticleListItem {...item} key={item.id} />
+          ))}
+        </ul>
+      ) : (
+        <p>投稿記事がありません</p>
+      )}
+    </div>
+  );
+};
+```
+
+- 一覧表示がされることのテスト
+まずはテストデータを用意
+```
+import { ItemProps } from "./ArticleListItem";
+
+export const items: ItemProps[] = [
+  {
+    id: "howto-testing-with-typescript",
+    title: "TypeScript を使ったテストの書き方",
+    body: "テストを書く時、TypeScript を使うことで、テストの保守性が向上します…",
+  },
+  {
+    id: "nextjs-link-component",
+    title: "Next.js の Link コンポーネント",
+    body: "Next.js の画面遷移には、Link コンポーネントを使用します…",
+  },
+  {
+    id: "react-component-testing-with-jest",
+    title: "Jest ではじめる React のコンポーネントテスト",
+    body: "Jest は単体テストとして、UIコンポーネントのテストが可能です…",
+  },
+];
+```
+
+getAllByRoleは該当要素を配列で取得するAPI。
+<li>要素は暗黙のロールとしてlistitemを持つ。
+.toHaveLength()は要素の数を検証する。
+
+```
+test("items の数だけ一覧表示される", () => {
+  render(<ArticleList items={items} />);
+  expect(screen.getAllByRole("listitem")).toHaveLength(3);
+});
+
+```
+- テスト対象でない要素を弾く方法
+within関数を利用して対象要素を絞り込むことができる
+↓<ul>内の<li>要素のみを取得している
+```
+test("items の数だけ一覧表示される", () => {
+  render(<ArticleList items={items} />);
+  const list = screen.getByRole("list");
+  expect(list).toBeInTheDocument();
+  expect(within(list).getAllByRole("listitem")).toHaveLength(3);
+});
+```
+
+- 表示されないことのテスト
+存在しないことの確認にはqueryByを接頭辞に持つAPIを使用する。
+取得できなかた場合は.not.toBeInTheDocument()や.toBeNull()等で検証ができる。
+
+```
+test("一覧アイテムが空のとき「投稿記事がありません」が表示される", () => {
+  render(<ArticleList items={[]} />);
+  const list = screen.queryByRole("list");
+  expect(list).not.toBeInTheDocument();
+  expect(list).toBeNull();
+  expect(screen.getByText("投稿記事がありません")).toBeInTheDocument();
+});
+```
+
+- 子コンポーネントのテスト
+今回は<ArticleListItem>を子コンポーネントとして利用していたが、コードを分けて書いているのでテストも分けて書く
+```
+export type ItemProps = {
+  id: string;
+  title: string;
+  body: string;
+};
+
+export const ArticleListItem = ({ id, title, body }: ItemProps) => {
+  return (
+    <li>
+      <h3>{title}</h3>
+      <p>{body}</p>
+      <a href={`/articles/${id}`}>もっと見る</a>
+    </li>
+  );
+};
+```
+
+```
+const item: ItemProps = {
+  id: "howto-testing-with-typescript",
+  title: "TypeScript を使ったテストの書き方",
+  body: "テストを書く時、TypeScript を使うことで、テストの保守性が向上します…",
+};
+
+test("ID に紐づいたリンクが表示される", () => {
+  render(<ArticleListItem {...item} />);
+  expect(screen.getByRole("link", { name: "もっと見る" })).toHaveAttribute(
+    "href",
+    "/articles/howto-testing-with-typescript"
+  );
+});
+```
+
+## インタラクティブなUIコンポーネントテスト
+- テスト対象
+```
+type Props = {
+  onChange?: React.ChangeEventHandler<HTMLInputElement>;
+};
+
+export const Agreement = ({ onChange }: Props) => {
+  return (
+    <fieldset>
+      <legend>利用規約の同意</legend>
+      <label>
+        <input type="checkbox" onChange={onChange} />
+        当サービスの<a href="/terms">利用規約</a>を確認し、これに同意します
+      </label>
+    </fieldset>
+  );
+};
+```
+
+<fieldset>は暗黙のロールとしてgroupロールを持つ。
+<legend>要素は<fieldset>の子要素として使用し、グループのタイトルをつけるための要素。
+以下のテストは<legend>の文字が<fieldset>のアクセシブルネームとして引用されることを検証する。
+
+```
+test("fieldset のアクセシブルネームは、legend を引用している", () => {
+  render(<Agreement />);
+  expect(
+    screen.getByRole("group", { name: "利用規約の同意" })
+  ).toBeInTheDocument();
+});
+```
+
+<legend>をdivに変えてマークアップしても<div>はロール要素を持たないため、ひとまとめのグループとして識別できない。
+
+- チェックボックスの初期状態を検証
+toBeCheckedでチェックの有無を検証できる。
+```
+test("チェックボックスはチェックが入っていない", () => {
+  render(<Agreement />);
+  expect(screen.getByRole("checkbox")).not.toBeChecked();
+});
+```
+
+- inputコンポーネントをテストする
+以下のコードはメールアドレスとパスワードを入力するためのコード
+```
+export const InputAccount = () => {
+  return (
+    <fieldset>
+      <legend>アカウント情報の入力</legend>
+      <div>
+        <label>
+          メールアドレス
+          <input type="text" placeholder="example@test.com" />
+        </label>
+      </div>
+      <div>
+        <label>
+          パスワード
+          <input type="password" placeholder="8文字以上で入力" />
+        </label>
+      </div>
+    </fieldset>
+  );
+};
+```
+
+**useEvent**で文字を入力するテストを書ける
+1. userEvent.setup()でAPIを呼び出すuserインスタンスを作成
+1. screen.getByRoleでメールアドレス入力欄を取得
+1. user.type()で入力操作を再現
+1. getByDisplayValue
+
+userEventを使用した操作はすべて実行完了を待つ必要があるのでawaiを使用する
+
+```
+const user = userEvent.setup();
+
+test("メールアドレス入力欄", async () => {
+  render(<InputAccount />);
+  const textbox = screen.getByRole("textbox", { name: "メールアドレス" });
+  const value = "taro.tanaka@example.com";
+  await user.type(textbox, value);
+  expect(screen.getByDisplayValue(value)).toBeInTheDocument();
+});
+```
+
+# 6章：カバレッジレポート
+カバレッジレポート＝テスト実行によって対象コードのどのくらいの範囲が実行されたかのレーポート
+
+```
+npx jest --coverage
+```
+で作成できる。
+ - Stmts(命令網羅率)
+ テスト対象ファイルに含まれるすべてのステートメント（命令）が1回以上実行されたか
+
+ - Branch（分岐網羅率）
+ テスト対象ファイルに含まれるすべての条件分岐が1回以上実行されたか
+
+ - Funcs（関数網羅率）
+ テスト対象ファイルに含まれるすべての関数が1回以上呼び出されたか
+
+ - Lines（行網羅率）
+ テスト対象ファイルに含まれるすべての行を少なくとも１回通過したか
